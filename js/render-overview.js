@@ -85,7 +85,7 @@ export function openXuatModal(item){
 
   let html = `<h3>Xuất kho</h3>
     <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${item.code} — ${item.name}</div>
-    ${item.detail?`<div style="margin-bottom:10px;font-size:11px;font-style:italic;color:var(--red);">${escapeHtml(item.detail)}</div>`:''}
+    ${item.detail?`<div class="item-detail-text" style="margin-bottom:10px;padding-top:0;border-top:none;">${escapeHtml(item.detail)}</div>`:''}
     <div class="xuat-status ${statusClass}">
       <div class="big-badge">${bigLabel}</div>
       <div class="sub">Tổng tồn hiện tại: <b>${total} ${item.unit}</b> · Mức tối thiểu: ${item.min} ${item.unit}</div>

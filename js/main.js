@@ -62,7 +62,7 @@ function renderRoot() {
     return;
   }
   if (store.status === 'idle' || store.status === 'loading') {
-    mount(app, html`<div class="gate"><p class="loading">Đang tải dữ liệu từ GitHub…</p></div>`);
+    mount(app, html`<div class="gate"><p class="loading">Đang lấy dữ liệu từ Siêu máy tính quá trình có thể mất 1 phút…</p></div>`);
     return;
   }
   if (store.status === 'error') return renderError();

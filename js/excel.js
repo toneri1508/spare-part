@@ -53,7 +53,7 @@ export async function downloadTemplate(v) {
 
   const ws = wb.addWorksheet('Nhap kho');
   ws.columns = [
-    { header: 'Mã spare part', key: 'code', width: 16 },
+    { header: 'Mã Q code', key: 'code', width: 16 },
     { header: 'Tên vật tư', key: 'name', width: 28 },
     { header: 'Nhóm', key: 'group', width: 14 },
     { header: 'Đơn vị', key: 'unit', width: 10 },

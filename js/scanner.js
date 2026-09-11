@@ -1,94 +1,83 @@
-/* ===== scanner.js (tu dong tach tu main.js, khong doi logic) ===== */
-import { openXuatModal } from './render-overview.js';
-import { applyScanCode } from './render-update.js';
-import { S } from './state.js';
-import { toast } from './utils.js';
+import { UserError } from './model.js';
 
-export let xuatCamStream=null, xuatCamRAF=null;
+const active = new Set();
 
-export async function toggleXuatCamera(){
-  if(xuatCamStream){ stopXuatScan(); return; }
-  if(!window.jsQR){ toast('Thư viện quét QR chưa tải xong — thử tải lại trang (Ctrl+Shift+R).'); return; }
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Trình duyệt này không hỗ trợ camera.'); return; }
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-    xuatCamStream=stream;
-    const video=document.getElementById('xuatCamVideo');
-    video.srcObject=stream; await video.play();
-    const wrap=document.getElementById('xuatCameraWrap'); if(wrap) wrap.classList.add('on');
-    const btn=document.getElementById('xuatCamBtn'); if(btn) btn.textContent='⏹ Tắt camera';
-    scanXuatLoop();
-  }catch(err){ toast('Không truy cập được camera: '+(err&&err.message?err.message:'không rõ lỗi')); }
+export const scannerActive = () => active.size > 0;
+
+export function stopAllScanners() {
+  [...active].forEach((h) => h.stop());
 }
 
-export function scanXuatLoop(){
-  const video=document.getElementById('xuatCamVideo'), canvas=document.getElementById('xuatCamCanvas');
-  if(!video||!canvas){ return; }
-  if(video.readyState!==video.HAVE_ENOUGH_DATA){ xuatCamRAF=requestAnimationFrame(scanXuatLoop); return; }
-  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-  const ctx=canvas.getContext('2d');
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const code=window.jsQR(imgData.data,imgData.width,imgData.height);
-  if(code && code.data){
-    const found=S.items.find(i=>i.code.toLowerCase()===code.data.trim().toLowerCase());
-    stopXuatScan();
-    if(found) openXuatModal(found); else toast('Không tìm thấy mã "'+code.data+'"');
-    return;
+/* container chứa sẵn một <video>. Trả về { stop }. Tự tắt camera khi đọc được mã. */
+export async function startScanner(container, onCode) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new UserError('Trình duyệt này không mở được camera. Hãy dùng Chrome hoặc Safari bản mới, qua đường dẫn https.');
   }
-  xuatCamRAF=requestAnimationFrame(scanXuatLoop);
-}
-
-export function stopXuatScan(){
-  if(xuatCamRAF) cancelAnimationFrame(xuatCamRAF);
-  xuatCamRAF=null;
-  if(xuatCamStream){ xuatCamStream.getTracks().forEach(t=>t.stop()); xuatCamStream=null; }
-  const wrap=document.getElementById('xuatCameraWrap'); if(wrap) wrap.classList.remove('on');
-  const btn=document.getElementById('xuatCamBtn'); if(btn) btn.textContent='📷 Quét QR';
-}
-
-/* ================= INVENTORY ================= */
-
-export async function toggleCamera(){
-  const wrap=document.getElementById('cameraWrap');
-  if(S.scanStream){ stopScan(); return; }
-  if(!window.jsQR){ toast('Thư viện quét QR chưa tải xong — thử tải lại trang (Ctrl+Shift+R).'); return; }
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Trình duyệt này không hỗ trợ camera.'); return; }
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-    S.scanStream=stream;
-    const video=document.getElementById('camVideo');
-    video.srcObject=stream; await video.play();
-    wrap.classList.add('on');
-    document.getElementById('camBtn').textContent='⏹ Tắt camera';
-    scanLoop();
-  }catch(err){
-    toast('Không truy cập được camera: '+(err&&err.message?err.message:'không rõ lỗi'));
+  stopAllScanners();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+  } catch (e) {
+    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    throw new UserError(denied ? 'Chưa được cấp quyền camera. Cho phép camera trong cài đặt trình duyệt rồi thử lại.' : 'Không mở được camera.');
   }
-}
 
-export function scanLoop(){
-  const video=document.getElementById('camVideo'), canvas=document.getElementById('camCanvas');
-  if(!video||!canvas){return;}
-  if(video.readyState===video.HAVE_ENOUGH_DATA && window.jsQR){
-    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-    const ctx=canvas.getContext('2d');
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
-    const code=window.jsQR(imgData.data,imgData.width,imgData.height);
-    if(code && code.data){
-      applyScanCode(code.data.trim());
-      toast('Đã quét: '+code.data.trim());
-      stopScan();
-      return;
-    }
+  const video = container.querySelector('video');
+  video.srcObject = stream;
+  container.hidden = false;
+  try { await video.play(); } catch { /* một số máy tự phát */ }
+
+  let detector = null;
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    } catch { detector = null; }
   }
-  S.scanRAF=requestAnimationFrame(scanLoop);
-}
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-export function stopScan(){
-  if(S.scanRAF) cancelAnimationFrame(S.scanRAF);
-  if(S.scanStream){ S.scanStream.getTracks().forEach(t=>t.stop()); S.scanStream=null; }
-  const wrap=document.getElementById('cameraWrap'); if(wrap) wrap.classList.remove('on');
-  const btn=document.getElementById('camBtn'); if(btn) btn.textContent='📷 Bật camera quét';
+  let stopped = false;
+  const handle = {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      stream.getTracks().forEach((t) => t.stop());
+      video.srcObject = null;
+      container.hidden = true;
+      active.delete(handle);
+      container.dispatchEvent(new CustomEvent('scanner-stop'));
+    },
+  };
+  active.add(handle);
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      if (video.readyState >= 2 && video.videoWidth) {
+        let text = null;
+        if (detector) {
+          const found = await detector.detect(video);
+          if (found[0]) text = found[0].rawValue;
+        } else if (window.jsQR) {
+          const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+          canvas.width = Math.round(video.videoWidth * scale);
+          canvas.height = Math.round(video.videoHeight * scale);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const r = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (r) text = r.data;
+        }
+        if (text && text.trim() && !stopped) {
+          handle.stop();
+          if (navigator.vibrate) navigator.vibrate(60);
+          onCode(text.trim());
+          return;
+        }
+      }
+    } catch { /* bỏ qua khung hình lỗi */ }
+    setTimeout(tick, 150);
+  };
+  tick();
+  return handle;
 }

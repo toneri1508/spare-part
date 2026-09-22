@@ -234,9 +234,9 @@ input[readonly] { background: var(--wall); color: var(--ink-2); }
 .suggest { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .suggest:empty { display: none; }
 .suggest-item {
-  width: 100%; display: grid; grid-template-columns: 36px auto 1fr auto; gap: 4px 12px; align-items: center; text-align: left;
+  width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: center; text-align: left;
   background: var(--sheet); border: 1px solid var(--rule-soft); border-left: 5px solid var(--green);
-  border-radius: var(--r-md); padding: 8px 12px; cursor: pointer; min-height: 52px;
+  border-radius: var(--r-md); padding: 10px 12px; cursor: pointer; min-height: 52px;
 }
 .suggest-item:hover { border-color: var(--blue); border-left-color: var(--blue); }
 .suggest-item.st-low { border-left-color: var(--yellow); }
@@ -245,7 +245,7 @@ input[readonly] { background: var(--wall); color: var(--ink-2); }
 .si-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-qty { font: 600 17px/1 var(--f-cond); white-space: nowrap; }
 .suggest-empty { padding: 10px 12px; color: var(--ink-2); background: var(--sheet); border-radius: var(--r-md); }
-@media (max-width: 460px) { .suggest-item { grid-template-columns: 32px 1fr auto; } .si-name { grid-column: 2 / -1; grid-row: 2; white-space: normal; } }
+@media (max-width: 460px) { .suggest-item { grid-template-columns: 1fr auto; } .si-name { grid-column: 1 / -1; grid-row: 2; white-space: normal; } }
 
 .scanner { margin-top: 10px; background: #000; border-radius: var(--r-lg); overflow: hidden; position: relative; }
 .scanner video { width: 100%; max-height: 56vh; object-fit: cover; aspect-ratio: 4 / 3; }
@@ -271,11 +271,9 @@ input[readonly] { background: var(--wall); color: var(--ink-2); }
 .item-list, .tx-list, .rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .item-row {
   width: 100%; text-align: left; cursor: pointer; background: var(--sheet); border: 1px solid var(--rule-soft); border-radius: var(--r-md);
-  padding: 10px 14px 10px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto;
-  grid-template-areas: "pic code qty" "pic name name" "pic gauge gauge" "pic foot foot"; gap: 2px 12px; align-items: center;
+  padding: 12px 14px 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "code qty" "name name" "gauge gauge" "foot foot"; gap: 2px 12px;
 }
 .item-row:hover { border-color: var(--rule); box-shadow: 0 1px 3px rgba(27, 42, 51, .08); }
-.item-row .avatar { grid-area: pic; align-self: start; }
 .ir-code { grid-area: code; font: 700 19px/1.1 var(--f-cond); letter-spacing: .02em; }
 .ir-name { grid-area: name; color: var(--ink-2); font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ir-qty { grid-area: qty; white-space: nowrap; color: var(--ink-2); font-size: 14px; }
@@ -287,8 +285,7 @@ input[readonly] { background: var(--wall); color: var(--ink-2); }
 .st-out .st-text { color: var(--red); }
 .st-out .ir-qty b { color: var(--red); }
 @media (min-width: 900px) {
-  .item-row { grid-template-columns: 52px 130px minmax(0, 1fr) 200px 110px; grid-template-areas: "pic code name gauge qty" "pic code name foot qty"; align-items: center; padding: 8px 16px; }
-  .item-row .avatar { align-self: center; }
+  .item-row { grid-template-columns: 150px minmax(0, 1fr) 200px 110px; grid-template-areas: "code name gauge qty" "code name foot qty"; align-items: center; padding: 10px 16px; }
   .item-row .gauge { margin-top: 0; }
   .ir-foot { margin-top: 2px; }
   .ir-qty { text-align: right; }
@@ -399,39 +396,7 @@ input[readonly] { background: var(--wall); color: var(--ink-2); }
 .connect-box { margin-top: 14px; display: grid; gap: 10px; justify-items: start; }
 .connect-box .field { width: 100%; }
 
-/* ---------- ảnh đại diện vật tư ---------- */
-
-.avatar {
-  flex: none; display: grid; place-items: center; background: var(--wall);
-  border: 1px solid var(--rule-soft); border-radius: var(--r-md);
-  background-size: cover; background-position: center; color: var(--ink-3);
-  transition: opacity .15s;
-}
-.avatar.has-photo { border-color: var(--rule); color: transparent; }
-.avatar-ico { width: 55%; height: 55%; }
-.avatar-sm { width: 40px; height: 40px; border-radius: var(--r-sm); }
-.avatar-md { width: 52px; height: 52px; }
-.avatar-lg { width: 104px; height: 104px; border-radius: var(--r-lg); }
-
-.avatar-pick { position: relative; width: 104px; height: 104px; flex: none; }
-.avatar-pick .avatar-lg { width: 100%; height: 100%; }
-.avatar-pick-btn {
-  position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer;
-  border-radius: var(--r-lg); overflow: hidden;
-}
-.avatar-pick-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
-.avatar-pick-edge {
-  position: absolute; right: -6px; bottom: -6px; width: 32px; height: 32px; border-radius: 50%;
-  background: var(--ink); color: #fff; display: grid; place-items: center; border: 2px solid var(--sheet); pointer-events: none;
-}
-.avatar-pick-edge .ico { width: 16px; height: 16px; }
-.avatar-row { display: flex; align-items: center; gap: 14px; }
-.avatar-row-text { display: grid; gap: 4px; }
-.avatar-row-text .btn-link { justify-self: start; }
-
-.item-head-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
-.item-head-row .item-head { margin-bottom: 0; flex: 1; min-width: 0; }
-
+/* ---------- nhập kho ---------- */
 
 .match { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 12px; border-radius: var(--r-md); margin-top: -4px; }
 .match-hit { background: var(--green-tint); border-left: 5px solid var(--green); }

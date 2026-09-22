@@ -143,26 +143,11 @@ export class GitHubRepo {
     return base64ToText(data.content);
   }
 
-  /* Đọc blob nhị phân (ảnh) — trả về base64 thô, không giải mã thành text. */
-  async getBlobBase64(sha) {
-    const { data } = await this.request('GET', `${this.base}/git/blobs/${sha}`);
-    return String(data.content).replace(/\n/g, '');
-  }
-
-  /* Tạo blob nhị phân độc lập (dùng cho ảnh) — trả về sha để đưa vào commit sau. */
-  async createBlob(base64) {
-    const { data } = await this.request('POST', `${this.base}/git/blobs`, { body: { content: base64, encoding: 'base64' } });
-    return data.sha;
-  }
-
-  /* files: [{ path, content }] (chữ, tạo blob luôn), [{ path, sha }] (blob nhị phân đã tạo sẵn),
-     hoặc [{ path, delete: true }] — tất cả nằm trong một commit. */
+  /* files: [{ path, content }] hoặc [{ path, delete: true }] — tất cả nằm trong một commit. */
   async commitFiles({ parentSha, baseTreeSha, files, message }) {
     const tree = files.map((f) =>
       f.delete
         ? { path: f.path, mode: '100644', type: 'blob', sha: null }
-        : f.sha
-        ? { path: f.path, mode: '100644', type: 'blob', sha: f.sha }
         : { path: f.path, mode: '100644', type: 'blob', content: f.content }
     );
     const t = await this.request('POST', `${this.base}/git/trees`, { body: { base_tree: baseTreeSha, tree } });

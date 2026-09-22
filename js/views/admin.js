@@ -71,8 +71,8 @@ function userEditor(id) {
         ${u && html`<span class="hint">Không đổi được ID vì lịch sử giao dịch gắn với ID này.</span>`}</label>
       <label class="field"><span class="label">Tên hiển thị</span><input name="name" value="${u?.name || ''}" ${u && raw('autofocus')}></label>
       <fieldset class="field"><legend class="label">Quyền</legend>
-        <label class="check"><input type="radio" name="role" value="user" ${(!u || u.role !== 'admin') && raw('checked')}><span>Nhân viên: nhập, xuất kho, tạo vật tư mới</span></label>
-        <label class="check"><input type="radio" name="role" value="admin" ${u?.role === 'admin' && raw('checked')}><span>Quản trị viên: sửa được mọi dữ liệu</span></label>
+        <label class="check"><input type="radio" name="role" value="user" ${(!u || u.role !== 'admin') && raw('checked')}><span>Nhân viên: nhập, xuất kho, tạo vật tư và sửa mọi thông số của vật tư kể cả số tồn</span></label>
+        <label class="check"><input type="radio" name="role" value="admin" ${u?.role === 'admin' && raw('checked')}><span>Quản trị viên: thêm quyền xóa vật tư, sửa lịch sử, quản lý người dùng, kho và cài đặt</span></label>
       </fieldset>
       <div class="sheet-actions">
         ${u && !self && html`<button type="button" class="btn btn-danger-ghost" data-delete>Xóa người dùng</button>`}
@@ -199,9 +199,9 @@ function whEditor(id) {
     if (!r.ok) return;
     save(null, `Xóa kho ${w.name}`, (d) => {
       const m = M.draftMeta(d);
-      if (M.draftItems(d).some((i) => M.num(i.stocks?.[w.id]) !== 0)) throw new M.UserError('Kho vừa có tồn kho mới, chưa xóa được.');
+      if (M.draftItems(d).some((i) => M.stockOf(d, i.id, w.id) !== 0)) throw new M.UserError('Kho vừa có tồn kho mới, chưa xóa được.');
       m.warehouses = m.warehouses.filter((x) => x.id !== w.id);
-      for (const it of M.draftItems(d)) if (it.stocks && w.id in it.stocks) delete it.stocks[w.id];
+      for (const it of M.draftItems(d)) M.setStock(d, it.id, w.id, 0);
     }, { allowRemove: { warehouses: 1 } }, () => { s.close(); toast('Đã xóa kho.'); });
   });
 }
@@ -260,16 +260,21 @@ function settings(box) {
         <label class="field"><span class="label">Tên web</span><input name="title" value="${st.title}"></label>
         <label class="field"><span class="label">Dòng phụ</span><input name="subtitle" value="${st.subtitle}"></label>
       </div>
-      <h2 class="sub-title">Quyền của nhân viên</h2>
-      <label class="check"><input type="checkbox" name="staffCanEditItems" ${st.staffCanEditItems && raw('checked')}>
-        <span>Cho phép nhân viên sửa thông tin vật tư (tên, nhóm, đơn vị, mức tối thiểu). Số tồn theo kho và thao tác xóa vẫn chỉ quản trị viên làm được.</span></label>
       <div class="btn-row"><button type="submit" class="btn btn-primary">Lưu cài đặt</button></div>
     </form>
+    <section class="panel">
+      <h2 class="sub-title">Quyền</h2>
+      <p class="hint">Quyền cố định theo vai trò, đổi vai trò từng người ở mục Người dùng.</p>
+      <dl class="kv">
+        <div><dt>Nhân viên</dt><dd>Nhập kho, xuất kho, quét QR, nhập Excel, tạo vật tư, sửa mọi thông số của vật tư kể cả số tồn từng kho.</dd></div>
+        <div><dt>Quản trị viên</dt><dd>Mọi quyền của nhân viên, thêm xóa vật tư, sửa và xóa giao dịch, quản lý người dùng, kho, dây chuyền, cài đặt và sao lưu.</dd></div>
+      </dl>
+    </section>
   `);
   const f = box.querySelector('form');
   f.addEventListener('submit', (e) => {
     e.preventDefault();
-    const next = { title: f.title.value.trim() || M.DEFAULT_SETTINGS.title, subtitle: f.subtitle.value.trim(), staffCanEditItems: f.staffCanEditItems.checked };
+    const next = { title: f.title.value.trim() || M.DEFAULT_SETTINGS.title, subtitle: f.subtitle.value.trim() };
     save(f.querySelector('[type=submit]'), 'Sửa cài đặt', (d) => {
       const m = M.draftMeta(d);
       m.settings = { ...m.settings, ...next };
@@ -344,11 +349,11 @@ function backup(box) {
     <section class="panel">
       <h2 class="sub-title">Sao lưu</h2>
       <p>Mọi thay đổi đã được GitHub giữ thành lịch sử, có thể quay lại bất kỳ lúc nào. Tải thêm một bản về máy để cất riêng.</p>
-      <p class="hint">Hiện có ${fmtNum(c.items)} vật tư, ${fmtNum(c.tx)} giao dịch, ${fmtNum(c.users)} người dùng. File tải về là JSON gọn nhẹ, chỉ vài chục KB — không kèm ảnh vật tư, vì ảnh đã an toàn trong lịch sử commit trên GitHub, tải kèm sẽ chỉ làm file nặng lên không cần thiết.</p>
+      <p class="hint">Hiện có ${fmtNum(c.items)} vật tư, ${fmtNum(c.tx)} giao dịch, ${fmtNum(c.users)} người dùng.</p>
       <button type="button" class="btn btn-primary" data-backup>${icon('download')}Tải bản sao lưu</button>
     </section>
     <section class="panel">
-      <h2 class="sub-title">Khôi phục từ file</h2>
+      <h2 class="sub-title">Khôi phục hoặc nhập dữ liệu cũ</h2>
       <div data-restore></div>
     </section>
   `);

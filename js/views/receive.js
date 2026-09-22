@@ -128,10 +128,9 @@ function renderQuick(box) {
     try {
       const now = await withBusy(f.querySelector('[type=submit]'), 'Đang lưu…', () =>
         mutate(`Nhập ${qty} ${it.unit} ${it.code}`, (d) => {
-          const x = M.requireItem(d, it.id);
-          M.addStock(x, whId, qty);
+          M.requireItem(d, it.id);
           M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'nhap', itemId: it.id, qty, whId, lineId: null, userId: store.user.id, note });
-          return M.num(x.stocks[whId]);
+          return M.addStock(d, it.id, whId, qty);
         })
       );
       setPref('inWh', whId);

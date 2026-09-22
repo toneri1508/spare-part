@@ -3,7 +3,6 @@ import { fmtNum, icon } from '../ui.js';
 import * as M from '../model.js';
 import { store } from '../store.js';
 import { itemPicker, bindPicker, itemRow, txRow, openCheckout, openItemSheet, openTxSheet } from '../components.js';
-import { bindAvatars } from '../avatar.js';
 
 const LIMIT = 12;
 let query = '';
@@ -59,7 +58,6 @@ export function render(el) {
         </section>`}
   `);
 
-  bindAvatars(el);
   bindPicker(el, {
     onType: (q) => { query = q; },
     onPick: (item, input) => {

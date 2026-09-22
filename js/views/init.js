@@ -13,7 +13,7 @@ export function renderInit(el) {
 
     <section class="choice">
       <h2>Khôi phục dữ liệu cũ</h2>
-      <p class="hint">Từ file sao lưu, hoặc file JSON xuất từ bản Firebase cũ (ví dụ file xuất từ trình duyệt).</p>
+      <p class="hint">Từ file sao lưu, file xuất từ trình duyệt, hoặc đọc thẳng từ Firebase của bản cũ.</p>
       <div data-restore></div>
     </section>
 

@@ -1,6 +1,5 @@
 import { GitHubRepo, GitHubError, gitBlobSha } from './github.js';
 import * as M from './model.js';
-import { blobToBase64 } from './photo.js';
 
 const CONN_KEY = 'spk.conn.v1';
 const USER_KEY = 'spk.user.v1';
@@ -87,12 +86,30 @@ export function decodeConnLink(s) {
 
 /* ---------- quyền ---------- */
 
+/* Hai vai trò:
+   - Quản trị viên: sửa được mọi thứ của ứng dụng (người dùng, kho, dây chuyền, cài đặt,
+     lịch sử giao dịch, sao lưu) và xóa được vật tư.
+   - Nhân viên: nhập/xuất kho, tạo vật tư, sửa mọi thông số của vật tư kể cả số tồn
+     theo từng kho. Không xóa vật tư và không đụng tới phần quản lý. */
 export const isAdmin = () => store.user?.role === 'admin';
-export const canEditItems = () => isAdmin() || !!store.view?.meta.settings.staffCanEditItems;
 
 /* ---------- đọc dữ liệu ---------- */
 
-const blobCache = new Map(); // sha -> text; blob theo sha không bao giờ đổi nên cache an toàn
+/* Bộ nhớ đệm nội dung file theo sha của Git. Cùng một sha thì chắc chắn cùng nội dung,
+   nên file nào chưa đổi thì khỏi tải lại — đó là lý do khi máy khác lưu, máy này chỉ
+   tải về đúng phần thay đổi.
+   Mỗi lần lưu sinh ra sha mới, bản cũ thành rác và không bao giờ dùng lại nữa, nên sau
+   mỗi lần đọc hoặc ghi ta dọn sạch những sha không còn thuộc phiên bản hiện tại.
+   Không dọn thì bộ nhớ tab cứ phình theo số lần nhập/xuất trong ca làm. */
+const blobCache = new Map(); // sha -> text
+let docShas = new Map(); // path -> sha của phiên bản đang dùng
+
+function pruneBlobCache() {
+  const live = new Set(docShas.values());
+  for (const sha of blobCache.keys()) {
+    if (!live.has(sha)) blobCache.delete(sha);
+  }
+}
 let headEtag = null;
 let inflight = null;
 let pollTimer = null;
@@ -144,6 +161,9 @@ async function readSnapshot(headSha) {
       }
     })
   );
+  // Danh sách file trên GitHub là bản chính xác nhất — lấy luôn làm mốc để dọn cache.
+  docShas = new Map(files.map((f) => [f.path, f.sha]));
+  pruneBlobCache();
   return { head: headSha, treeSha, docs };
 }
 
@@ -155,6 +175,8 @@ function classify(docs) {
     throw new M.UserError(`Kho dữ liệu thiếu file ${hasMeta ? M.ITEMS : M.META}. Mở lịch sử commit trên GitHub để khôi phục file này.`);
   }
   if (!Array.isArray(docs[M.ITEMS])) throw new M.UserError('File data/items.json không đúng định dạng.');
+  const s = docs[M.STOCKS];
+  if (s != null && (typeof s !== 'object' || Array.isArray(s))) throw new M.UserError('File data/stocks.json không đúng định dạng.');
   return 'ready';
 }
 
@@ -224,8 +246,6 @@ let queue = Promise.resolve();
    1) đọc phiên bản mới nhất  2) chạy thao tác trên bản sao  3) kiểm tra không mất dữ liệu
    4) commit nối tiếp đúng phiên bản vừa đọc  5) nếu có người lưu trước → lặp lại từ bước 1.
    Nếu bất kỳ bước đọc nào lỗi, thao tác dừng và KHÔNG ghi gì cả. */
-/* opts.extraFiles: [{ path, sha }] hoặc [{ path, delete: true }] — file nhị phân (ảnh) đã có sẵn sha,
-   được đưa vào CÙNG một commit với thay đổi JSON, để không bao giờ có ảnh mà thiếu tham chiếu hoặc ngược lại. */
 export function mutate(message, fn, opts = {}) {
   const run = () => doMutate(message, fn, opts);
   const p = queue.then(run, run);
@@ -250,9 +270,15 @@ async function doMutate(message, fn, opts) {
 
       const before = store.docs || {};
       const draft = structuredClone(before);
+      /* Chuyển dữ liệu kiểu cũ (tồn nằm trong vật tư) sang stocks.json trước khi thao tác,
+         để mọi hàm bên dưới chỉ phải biết một kiểu dữ liệu. */
+      M.normalizeDraft(draft);
       const result = fn(draft);
+      // Khôi phục có thể ghi đè bằng dữ liệu kiểu cũ → chuẩn hóa lại lần nữa.
+      M.normalizeDraft(draft);
+      // Dồn giao dịch ngày cũ vào file tháng: chỉ thực sự ghi một lần mỗi ngày.
+      M.foldHotTx(draft);
       const changes = M.diffDocs(before, draft);
-      if (opts.extraFiles?.length) changes.push(...opts.extraFiles);
       if (!changes.length) return result;
       M.guardAgainstLoss(before, draft, opts);
       const status = classify(draft);
@@ -265,11 +291,22 @@ async function doMutate(message, fn, opts) {
           files: changes,
           message: `${message}\n\nNgười thực hiện: ${who}`,
         });
+        /* Tự lưu sẵn nội dung vừa ghi vào cache để lần đồng bộ sau khỏi tải lại,
+           đồng thời cập nhật mốc sha rồi dọn những bản cũ vừa bị thay thế. */
         for (const c of changes) {
-          if (c.delete || !('content' in c)) continue; // file nhị phân (ảnh) đã cache riêng lúc tải lên
+          if (c.delete) {
+            docShas.delete(c.path);
+            continue;
+          }
           const sha = await gitBlobSha(c.content).catch(() => null);
-          if (sha) blobCache.set(sha, c.content);
+          if (sha) {
+            blobCache.set(sha, c.content);
+            docShas.set(c.path, sha);
+          } else {
+            docShas.delete(c.path); // không tính được sha thì coi như chưa có bản nào
+          }
         }
+        pruneBlobCache();
         const prev = store.status;
         Object.assign(store, {
           head: commitSha,
@@ -296,46 +333,6 @@ async function doMutate(message, fn, opts) {
     store.saving--;
     emit('saving');
   }
-}
-
-/* ---------- ảnh đại diện vật tư ---------- */
-/* Ảnh KHÔNG nằm trong docs (data/*.json) — không tải toàn bộ ảnh mỗi lần đồng bộ,
-   chỉ tải đúng ảnh đang cần xem, và giữ lại trong bộ nhớ theo sha (sha đổi khi ảnh đổi). */
-
-const photoCache = new Map(); // sha -> object URL
-export const photoPath = (itemId) => `data/photos/${itemId}.jpg`;
-
-export async function getPhotoUrl(sha) {
-  if (!sha) return null;
-  if (photoCache.has(sha)) return photoCache.get(sha);
-  if (!store.gh) return null;
-  const base64 = await store.gh.getBlobBase64(sha);
-  const bin = atob(base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
-  photoCache.set(sha, url);
-  return url;
-}
-
-export async function setItemPhoto(itemId, blob) {
-  const base64 = await blobToBase64(blob);
-  const sha = await store.gh.createBlob(base64);
-  photoCache.set(sha, URL.createObjectURL(blob)); // xem trước ngay, khỏi tải lại từ GitHub
-  const label = store.view?.itemById.get(itemId)?.code || itemId;
-  await mutate(`Cập nhật ảnh ${label}`, (d) => {
-    const it = M.requireItem(d, itemId);
-    it.photo = { sha, updatedAt: Date.now() };
-  }, { extraFiles: [{ path: photoPath(itemId), sha }] });
-  return sha;
-}
-
-export async function removeItemPhoto(itemId) {
-  const label = store.view?.itemById.get(itemId)?.code || itemId;
-  await mutate(`Xóa ảnh ${label}`, (d) => {
-    const it = M.requireItem(d, itemId);
-    delete it.photo;
-  }, { extraFiles: [{ path: photoPath(itemId), delete: true }] });
 }
 
 export function backupObject() {

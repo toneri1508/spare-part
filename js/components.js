@@ -1,11 +1,9 @@
 import { html, raw, mount } from './html.js';
 import { icon, fmtNum, fmtTime, timeAgo, toast, showError, openSheet, confirmDialog, withBusy, go } from './ui.js';
 import * as M from './model.js';
-import { store, mutate, isAdmin, canEditItems, pref, setPref, setItemPhoto, removeItemPhoto, photoPath } from './store.js';
+import { store, mutate, isAdmin, pref, setPref } from './store.js';
 import { startScanner } from './scanner.js';
 import { qrSvg } from './qr.js';
-import { compressAvatar } from './photo.js';
-import { avatarSpan, bindAvatars, loadAvatarNow } from './avatar.js';
 
 /* ---------- thước tồn kho: vạch là mức tối thiểu ---------- */
 
@@ -23,7 +21,6 @@ export function gauge(item) {
 export function itemRow(item) {
   const st = M.statusOf(item);
   return html`<li><button type="button" class="item-row st-${st}" data-item="${item.id}">
-    ${avatarSpan(item, 'sm')}
     <span class="ir-code">${item.code}</span>
     <span class="ir-name">${item.name}</span>
     <span class="ir-qty"><b>${fmtNum(M.totalQty(item))}</b> ${item.unit}</span>
@@ -73,10 +70,8 @@ export function bindPicker(root, { onPick, onType, onScan, limit = 8 }) {
       return;
     }
     mount(list, matches.map((i) => html`<li><button type="button" class="suggest-item st-${M.statusOf(i)}" data-pick="${i.id}">
-      ${avatarSpan(i, 'sm')}
       <span class="si-code">${i.code}</span><span class="si-name">${i.name}</span><span class="si-qty">${fmtNum(M.totalQty(i))} ${i.unit}</span>
     </button></li>`));
-    bindAvatars(list);
   };
 
   const pick = (item) => {
@@ -183,7 +178,7 @@ export function openItemSheet(itemId) {
   const recent = (v.txByItem.get(item.id) || []).slice(0, 6);
 
   const s = openSheet(html`
-    <div class="item-head-row">${avatarSpan(item, 'lg')}${itemHead(item)}</div>
+    ${itemHead(item)}
     <div class="stock-big st-${st}">
       <span class="sb-num">${fmtNum(t)}</span><span class="sb-unit">${item.unit}</span>
       <span class="st-pill">${M.STATUS_LABEL[st]}</span>
@@ -195,7 +190,7 @@ export function openItemSheet(itemId) {
       <button type="button" class="btn btn-primary" data-act="out">${icon('out')}Xuất kho</button>
       <button type="button" class="btn" data-act="in">${icon('in')}Nhập kho</button>
       <button type="button" class="btn" data-act="qr">${icon('qr')}Tem QR</button>
-      ${canEditItems() && html`<button type="button" class="btn" data-act="edit">${icon('edit')}Sửa</button>`}
+      <button type="button" class="btn" data-act="edit">${icon('edit')}Sửa</button>
     </div>
     <h3 class="sub-title">Tồn theo kho</h3>
     ${stocks.length
@@ -204,7 +199,6 @@ export function openItemSheet(itemId) {
     <h3 class="sub-title">Giao dịch gần đây</h3>
     ${recent.length ? html`<ul class="tx-mini-list">${recent.map((x) => txMini(v, x, item))}</ul>` : html`<p class="hint">Chưa có giao dịch.</p>`}
   `, { title: 'Vật tư' });
-  bindAvatars(s.body);
 
   s.body.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
@@ -295,13 +289,12 @@ export function openCheckout(itemId) {
       const left = await withBusy(form.querySelector('[type=submit]'), 'Đang lưu…', () =>
         mutate(`Xuất ${qty} ${item.unit} ${item.code}`, (d) => {
           const it = M.requireItem(d, itemId);
-          const now = M.num(it.stocks[whId]);
+          const now = M.stockOf(d, itemId, whId);
           if (qty > now && !allowNegative) {
             throw new M.UserError(`Số tồn vừa thay đổi: ${M.whName(store.view, whId)} chỉ còn ${now} ${it.unit}.`);
           }
-          M.addStock(it, whId, -qty);
           M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'xuat', itemId, qty, whId, lineId, userId: store.user.id, note });
-          return M.num(it.stocks[whId]);
+          return M.addStock(d, itemId, whId, -qty);
         })
       );
       setPref('outWh', whId);
@@ -320,7 +313,6 @@ export function openItemEditor(itemId, { code = '' } = {}) {
   const v = store.view;
   const item = itemId ? v.itemById.get(itemId) : null;
   const isNew = !item;
-  if (!isNew && !canEditItems()) return;
   const admin = isAdmin();
   const orig = item
     ? { code: item.code, name: item.name, unit: item.unit || '', group: item.group || '', min: M.num(item.min), detail: item.detail || '' }
@@ -329,21 +321,6 @@ export function openItemEditor(itemId, { code = '' } = {}) {
 
   const s = openSheet(html`
     <form class="form" data-form novalidate>
-      ${!isNew && html`<div class="field avatar-row">
-        <span class="avatar-pick">
-          ${avatarSpan(item, 'lg')}
-          <label class="avatar-pick-btn" aria-label="Đổi ảnh vật tư">
-            <input type="file" accept="image/*" capture="environment" data-photo-input>
-          </label>
-          <span class="avatar-pick-edge">${icon('edit')}</span>
-        </span>
-        <span class="avatar-row-text">
-          <span class="label">Ảnh đại diện</span>
-          <span class="hint" data-photo-hint>${item.photo ? 'Chạm vào ảnh để thay ảnh khác.' : 'Chạm vào khung để chụp hoặc chọn ảnh.'}</span>
-          ${item.photo && html`<button type="button" class="btn-link" data-photo-remove>Xóa ảnh</button>`}
-        </span>
-      </div>`}
-      ${isNew && html`<p class="hint">Lưu vật tư trước, sau đó mở lại để thêm ảnh đại diện.</p>`}
       <div class="row2">
         <label class="field"><span class="label">Mã spare part</span>
           <input name="code" value="${item ? item.code : M.normCode(code)}" autocapitalize="characters" spellcheck="false" ${isNew && !code && raw('autofocus')}></label>
@@ -355,10 +332,10 @@ export function openItemEditor(itemId, { code = '' } = {}) {
         <label class="field"><span class="label">Tồn tối thiểu</span><input name="min" type="number" inputmode="numeric" min="0" value="${item ? M.num(item.min) : 5}"></label>
       </div>
       <label class="field"><span class="label">Mô tả chi tiết <i>không bắt buộc</i></span><textarea name="detail" rows="2">${item?.detail || ''}</textarea></label>
-      ${!isNew && admin && html`<fieldset class="stock-edit"><legend>Tồn theo kho</legend>
+      ${!isNew && html`<fieldset class="stock-edit"><legend>Tồn theo kho</legend>
         ${v.meta.warehouses.map((w) => html`<label class="field field-inline"><span class="label">${w.name}</span>
           <input type="number" inputmode="numeric" data-stock="${w.id}" data-orig="${M.num(item.stocks?.[w.id])}" value="${M.num(item.stocks?.[w.id])}"></label>`)}
-        <p class="hint">Mỗi thay đổi số tồn được ghi thành giao dịch "Điều chỉnh tồn kho" trong Lịch sử.</p>
+        <p class="hint">Mỗi thay đổi số tồn được ghi thành giao dịch "Điều chỉnh tồn kho" trong Lịch sử, kèm tên người sửa.</p>
       </fieldset>`}
       <datalist id="dl-groups">${v.groups.map((g) => html`<option value="${g}"></option>`)}</datalist>
       <datalist id="dl-units">${units.map((u) => html`<option value="${u}"></option>`)}</datalist>
@@ -370,53 +347,6 @@ export function openItemEditor(itemId, { code = '' } = {}) {
   `, { title: isNew ? 'Vật tư mới' : 'Sửa vật tư' });
 
   const form = s.body.querySelector('[data-form]');
-
-  if (!isNew) {
-    const avatarEl = s.body.querySelector('.avatar');
-    if (avatarEl) loadAvatarNow(avatarEl);
-    const photoInput = s.body.querySelector('[data-photo-input]');
-    const photoHint = s.body.querySelector('[data-photo-hint]');
-    photoInput?.addEventListener('change', async () => {
-      const file = photoInput.files[0];
-      photoInput.value = '';
-      if (!file) return;
-      const original = photoHint.textContent;
-      try {
-        photoHint.textContent = 'Đang nén ảnh…';
-        const blob = await compressAvatar(file);
-        avatarEl.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`;
-        avatarEl.classList.add('has-photo');
-        photoHint.textContent = `Đang tải lên GitHub… (${Math.round(blob.size / 1024)}KB)`;
-        await setItemPhoto(itemId, blob);
-        photoHint.textContent = 'Đã lưu ảnh.';
-        toast('Đã cập nhật ảnh vật tư.');
-        if (!s.body.querySelector('[data-photo-remove]')) {
-          const btn = document.createElement('button');
-          btn.type = 'button'; btn.className = 'btn-link'; btn.dataset.photoRemove = '';
-          btn.textContent = 'Xóa ảnh';
-          s.body.querySelector('.avatar-row-text').appendChild(btn);
-        }
-      } catch (err) {
-        photoHint.textContent = original;
-        showError(err);
-      }
-    });
-    s.body.addEventListener('click', async (e) => {
-      if (!e.target.closest('[data-photo-remove]')) return;
-      const r = await confirmDialog({ title: 'Xóa ảnh vật tư?', message: `Xóa ảnh của ${item.code}?`, confirmText: 'Xóa ảnh', danger: true });
-      if (!r.ok) return;
-      try {
-        await removeItemPhoto(itemId);
-        avatarEl.style.backgroundImage = '';
-        avatarEl.classList.remove('has-photo');
-        photoHint.textContent = 'Chạm vào khung để chụp hoặc chọn ảnh.';
-        e.target.closest('[data-photo-remove]').remove();
-        toast('Đã xóa ảnh vật tư.');
-      } catch (err) {
-        showError(err);
-      }
-    });
-  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -442,17 +372,16 @@ export function openItemEditor(itemId, { code = '' } = {}) {
           const dup = items.find((i) => M.normCode(i.code) === next.code && i.id !== itemId);
           if (dup) throw new M.UserError(`Mã ${next.code} đã được dùng cho "${dup.name}".`);
           if (isNew) {
-            items.push({ id: M.uid('it'), ...next, stocks: {} });
+            items.push({ id: M.uid('it'), ...next });
             return;
           }
           const it = M.requireItem(d, itemId);
           for (const k of changedFields) it[k] = next[k];
           const now = Date.now();
           stockEdits.forEach(({ whId, qty }, n) => {
-            const diff = qty - M.num(it.stocks[whId]);
+            const diff = qty - M.stockOf(d, itemId, whId);
             if (!diff) return;
-            if (qty === 0) delete it.stocks[whId];
-            else it.stocks[whId] = qty;
+            M.setStock(d, itemId, whId, qty);
             M.pushTx(d, {
               id: M.uid('tx'), ts: now + n, type: diff > 0 ? 'nhap' : 'xuat', itemId, qty: Math.abs(diff), whId,
               lineId: null, userId: store.user.id, note: 'Điều chỉnh tồn kho', source: 'adjust',
@@ -481,7 +410,7 @@ export function openItemEditor(itemId, { code = '' } = {}) {
         const items = M.draftItems(d);
         const i = items.findIndex((x) => x.id === itemId);
         if (i >= 0) items.splice(i, 1);
-      }, { allowRemove: { items: 1 }, extraFiles: item.photo ? [{ path: photoPath(itemId), delete: true }] : undefined });
+      }, { allowRemove: { items: 1 } });
       s.close();
       toast(`Đã xóa ${item.code}.`);
     } catch (err) {
@@ -617,8 +546,8 @@ export function openTxSheet(txId) {
           if (sync) {
             const it = M.draftItems(d).find((i) => i.id === old.itemId);
             if (it) {
-              M.addStock(it, old.whId, -M.stockDelta(old));
-              M.addStock(it, next.whId, M.stockDelta(next));
+              M.addStock(d, it.id, old.whId, -M.stockDelta(old));
+              M.addStock(d, it.id, next.whId, M.stockDelta(next));
             }
           }
           d[loc.path][loc.index] = next;
@@ -646,7 +575,7 @@ export function openTxSheet(txId) {
         if (!loc) return;
         if (r.checked) {
           const it = M.draftItems(d).find((i) => i.id === loc.tx.itemId);
-          if (it) M.addStock(it, loc.tx.whId, -M.stockDelta(loc.tx));
+          if (it) M.addStock(d, it.id, loc.tx.whId, -M.stockDelta(loc.tx));
         }
         M.removeTxAt(d, loc);
       }, { allowRemove: { tx: 1 } });

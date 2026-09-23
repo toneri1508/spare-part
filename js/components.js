@@ -289,6 +289,8 @@ export function openCheckout(itemId) {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const btn = form.querySelector('[type=submit]');
+    if (btn.disabled) return; // chặn bấm hai lần trong lúc sheet đang đóng lại
     const whId = form.wh.value;
     const lineId = form.line.value || null;
     const qty = readQty(form.qty);
@@ -307,27 +309,32 @@ export function openCheckout(itemId) {
       if (!r.ok) return;
       allowNegative = true;
     }
+    btn.disabled = true;
 
-    try {
-      const left = await withBusy(form.querySelector('[type=submit]'), 'Đang lưu…', () =>
-        mutate(`Xuất ${qty} ${item.unit} ${item.code}`, (d) => {
-          const it = M.requireItem(d, itemId);
-          const now = M.num(it.stocks[whId]);
-          if (qty > now && !allowNegative) {
-            throw new M.UserError(`Số tồn vừa thay đổi: ${M.whName(store.view, whId)} chỉ còn ${now} ${it.unit}.`);
-          }
-          M.addStock(it, whId, -qty);
-          M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'xuat', itemId, qty, whId, lineId, userId: store.user.id, note });
-          return M.num(it.stocks[whId]);
-        })
-      );
-      setPref('outWh', whId);
-      if (lineId) setPref('outLine', lineId);
-      s.close();
-      toast(`Đã xuất ${qty} ${item.unit} ${item.code}. ${M.whName(store.view, whId)} còn ${left}.`);
-    } catch (err) {
-      showError(err);
-    }
+    /* Ghi lên GitHub mất vài giây (nhiều lượt gọi API để bảo đảm không mất dữ liệu),
+       nên không bắt người đứng ở kho chờ nhìn màn hình xoay: đóng ngay, báo đã xuất
+       ngay (đúng những gì họ vừa bấm), rồi lưu thật sự chạy ngầm phía sau. store.view
+       vẫn giữ nguyên cho tới khi mutate() thật sự xong nên không có gì bị đè hai lần.
+       Nếu lưu ngầm lỗi (mất mạng, tồn vừa đổi…) thì báo lỗi rõ để xuất lại — không có
+       gì bị mất, vì chỉ khi mutate() thành công store mới thật sự đổi. */
+    setPref('outWh', whId);
+    if (lineId) setPref('outLine', lineId);
+    s.close();
+    const estLeft = Math.max(0, current - qty);
+    toast(`Đã xuất ${qty} ${item.unit} ${item.code}. ${M.whName(v, whId)} dự kiến còn ${estLeft}.`);
+
+    mutate(`Xuất ${qty} ${item.unit} ${item.code}`, (d) => {
+      const it = M.requireItem(d, itemId);
+      const now = M.num(it.stocks[whId]);
+      if (qty > now && !allowNegative) {
+        throw new M.UserError(`Số tồn vừa thay đổi: ${M.whName(store.view, whId)} chỉ còn ${now} ${it.unit}.`);
+      }
+      M.addStock(it, whId, -qty);
+      M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'xuat', itemId, qty, whId, lineId, userId: store.user.id, note });
+      return M.num(it.stocks[whId]);
+    }).catch((err) => {
+      showError(new M.UserError(`Không lưu được lượt xuất ${qty} ${item.unit} ${item.code}: ${err?.message || 'có lỗi.'} Vui lòng xuất lại.`));
+    });
   });
 }
 

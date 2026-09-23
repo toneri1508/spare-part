@@ -117,31 +117,37 @@ function renderQuick(box) {
     if (e.target.closest('[data-create]')) openItemEditor(null, { code: form.code });
   });
 
-  f.addEventListener('submit', async (e) => {
+  f.addEventListener('submit', (e) => {
     e.preventDefault();
+    const btn = f.querySelector('[type=submit]');
+    if (btn.disabled) return; // chặn bấm hai lần
     const it = M.findByCode(store.view.items, form.code);
     if (!it) { toast('Chọn vật tư có sẵn, hoặc tạo vật tư mới trước.', 'warn'); picker.input.focus(); return; }
     const qty = readQty(f.qty);
     if (!qty) { toast('Số lượng phải là số nguyên lớn hơn 0.', 'warn'); f.qty.focus(); return; }
     const whId = f.wh.value;
     const note = f.note.value.trim();
-    try {
-      const now = await withBusy(f.querySelector('[type=submit]'), 'Đang lưu…', () =>
-        mutate(`Nhập ${qty} ${it.unit} ${it.code}`, (d) => {
-          const x = M.requireItem(d, it.id);
-          M.addStock(x, whId, qty);
-          M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'nhap', itemId: it.id, qty, whId, lineId: null, userId: store.user.id, note });
-          return M.num(x.stocks[whId]);
-        })
-      );
-      setPref('inWh', whId);
-      toast(`Đã nhập ${qty} ${it.unit} ${it.code} vào ${M.whName(store.view, whId)}. Kho này hiện có ${now}.`);
-      Object.assign(form, { code: '', qty: 1, note: '', whId });
-      rerender();
-      requestAnimationFrame(() => document.querySelector('#view [data-picker-input]')?.focus());
-    } catch (err) {
-      showError(err);
-    }
+    btn.disabled = true;
+
+    /* Ghi lên GitHub mất vài giây — người đứng ở kho quét liên tục nhiều mã không nên
+       phải đợi từng lượt. Báo đã nhập và sẵn sàng cho mã tiếp theo ngay, còn lưu thật
+       sự chạy ngầm phía sau (store chỉ thật sự đổi khi mutate() xong, nên không có gì
+       ghi đè hai lần). Nếu lưu ngầm lỗi thì báo rõ để nhập lại đúng mã đó. */
+    const estNow = M.num(it.stocks?.[whId]) + qty;
+    setPref('inWh', whId);
+    toast(`Đã nhập ${qty} ${it.unit} ${it.code} vào ${M.whName(store.view, whId)}. Kho này dự kiến có ${estNow}.`);
+    Object.assign(form, { code: '', qty: 1, note: '', whId });
+    rerender();
+    requestAnimationFrame(() => document.querySelector('#view [data-picker-input]')?.focus());
+
+    mutate(`Nhập ${qty} ${it.unit} ${it.code}`, (d) => {
+      const x = M.requireItem(d, it.id);
+      M.addStock(x, whId, qty);
+      M.pushTx(d, { id: M.uid('tx'), ts: Date.now(), type: 'nhap', itemId: it.id, qty, whId, lineId: null, userId: store.user.id, note });
+      return M.num(x.stocks[whId]);
+    }).catch((err) => {
+      showError(new M.UserError(`Không lưu được lượt nhập ${qty} ${it.unit} ${it.code}: ${err?.message || 'có lỗi.'} Vui lòng nhập lại.`));
+    });
   });
 
   drawMatch();

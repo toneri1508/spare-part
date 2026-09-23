@@ -1,17 +1,10 @@
-/* Đưa dữ liệu cũ vào kho GitHub. Nhận được:
-   - file sao lưu của web này
-   - dữ liệu dạng { sp_meta, sp_items, sp_tx, sp_tx_hidden } của bản Firebase cũ
+/* Đưa dữ liệu cũ vào kho GitHub, từ một file JSON người dùng tải lên. Nhận diện được:
+   - file sao lưu của chính web này (định dạng spare-part-github-backup)
+   - file JSON dạng { sp_meta, sp_items, sp_tx, sp_tx_hidden } của bản Firebase cũ
    - file "sao-luu-trinh-duyet.json" xuất từ bộ nhớ đệm trình duyệt (định dạng nội bộ Firestore)
-   - đọc thẳng Firestore qua REST, kể cả đọc lại dữ liệu tại một thời điểm trong quá khứ (PITR) */
+   Không còn kết nối trực tiếp tới Firebase — chỉ đọc từ file người dùng đã có sẵn. */
 
 import * as M from './model.js';
-
-export const OLD_FIREBASE = {
-  projectId: 'spare-part-dashboard',
-  databaseId: '(default)',
-  collection: 'sparePartDashboard',
-  apiKey: 'AIzaSyDa8nngf0HhSOtthRaPEUZ11SD6WjzyeJw',
-};
 
 const KEYS = ['sp_meta', 'sp_items', 'sp_tx', 'sp_tx_hidden'];
 
@@ -168,15 +161,8 @@ export function convertOld({ meta, items, tx, hidden }) {
     }
   }
 
-  // Tách tồn kho ra file riêng đúng cấu trúc hiện tại.
-  const outStocks = {};
-  for (const it of outItems) {
-    if (Object.keys(it.stocks).length) outStocks[it.id] = it.stocks;
-    delete it.stocks;
-  }
-
   const hiddenSet = new Set(Array.isArray(hidden) ? hidden : []);
-  const files = { [M.META]: outMeta, [M.ITEMS]: outItems, [M.STOCKS]: outStocks };
+  const files = { [M.META]: outMeta, [M.ITEMS]: outItems };
   const seenTx = new Set();
   const txList = (Array.isArray(tx) ? tx : []).filter((t) => t && typeof t === 'object');
   for (const t of txList) {
@@ -197,7 +183,7 @@ export function convertOld({ meta, items, tx, hidden }) {
       ...(t.source ? { source: t.source } : {}),
       ...(hiddenSet.has(t.id) ? { hidden: true } : {}),
     };
-    const path = M.txArchivePath(clean.ts);
+    const path = M.txPath(clean.ts);
     (files[path] ||= []).push(clean);
   }
   for (const [p, list] of Object.entries(files)) {
@@ -236,28 +222,4 @@ export function analyze(json, label) {
   if (best.sp_items && best.sp_items.size === 0) warnings.push('Danh sách vật tư tìm được đang trống — có thể đây là bản đã bị xóa trắng.');
   if (best.sp_meta && looksLikeResetMeta(best.sp_meta.value)) warnings.push('Danh sách người dùng giống bản mặc định (Nhân viên 01, 02…) — có thể đã bị ghi đè. Kiểm tra lại sau khi khôi phục.');
   return { files, counts: M.countDocs(files), warnings, notes, label };
-}
-
-/* ---------- đọc thẳng từ Firestore ---------- */
-
-export async function fetchFirestore({ projectId, databaseId, collection, apiKey, readTime }) {
-  const params = new URLSearchParams({ pageSize: '100' });
-  if (apiKey) params.set('key', apiKey);
-  if (readTime) params.set('readTime', readTime);
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId || '(default)')}/documents/${encodeURIComponent(collection)}?${params}`;
-  let res;
-  try {
-    res = await fetch(url, { cache: 'no-store' });
-  } catch {
-    throw new M.UserError('Không kết nối được Firebase. Kiểm tra mạng.');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data?.error?.message || `Lỗi ${res.status}`;
-    if (res.status === 403) throw new M.UserError(`Firebase từ chối quyền đọc: ${msg}`);
-    if (/readTime|read_time|PITR|version/i.test(msg)) throw new M.UserError(`Không đọc được tại thời điểm đã chọn: ${msg}. Thời điểm phải trong 1 giờ qua, hoặc trong 7 ngày nếu đã bật PITR trước đó.`);
-    throw new M.UserError(`Firebase báo lỗi: ${msg}`);
-  }
-  if (!data.documents || !data.documents.length) throw new M.UserError('Collection này không có document nào (tại thời điểm đã chọn).');
-  return data;
 }

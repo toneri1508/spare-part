@@ -49,15 +49,22 @@ Có thể dùng luôn kho `spare-part-dashboard` cũ: xóa các file cũ, tải 
 
 ## Khôi phục dữ liệu từ Firebase cũ
 
-Vào màn hình khởi tạo (hoặc **Quản lý → Sao lưu, khôi phục**) và chọn một nguồn:
+Web không kết nối trực tiếp tới Firebase nữa — chỉ đọc từ một file JSON bạn tải lên. Vào màn hình khởi tạo (hoặc **Quản lý → Sao lưu, khôi phục**), bấm **Chọn file JSON** và chọn:
 
-**Từ Firebase.** Các ô đã điền sẵn cấu hình của bản cũ.
-- Nếu đã bật PITR (Point-in-time recovery) trong Firebase, chọn **Đọc dữ liệu tại thời điểm** là một phút trước lúc bị xóa, ví dụ 15:39 ngày 11/09/2026. Firestore giữ bản cũ 7 ngày kể từ khi bật PITR.
-- Nếu đã clone database về thời điểm cũ, đổi ô **Database** thành tên database clone (ví dụ `khoi-phuc`) và để trống ô thời điểm.
+- File `sao-luu-trinh-duyet.json` đã xuất từ laptop còn phiên đăng nhập cũ, hoặc
+- Bất kỳ file JSON nào chứa dữ liệu kiểu cũ (`sp_meta`, `sp_items`, `sp_tx`), ví dụ tải thủ công từ Firebase Console hoặc từ Google Cloud Console.
 
-**Từ file.** Chọn file `sao-luu-trinh-duyet.json` đã xuất từ laptop còn phiên đăng nhập cũ. Web tự dò mọi phiên bản dữ liệu trong file và chọn bản đầy đủ nhất.
+Web tự dò mọi phiên bản dữ liệu trong file và chọn bản đầy đủ nhất, rồi hiện bản xem trước (số vật tư, giao dịch, 5 vật tư đầu) để kiểm tra trước khi bấm khôi phục.
 
-Web luôn hiện bản xem trước (số vật tư, giao dịch, 5 vật tư đầu) để kiểm tra trước khi bấm khôi phục.
+## Ảnh đại diện vật tư
+
+Mỗi vật tư có thể gắn **một ảnh đại diện**, giúp nhận ra đúng món đồ khi tìm trong kho. Tải ảnh mới sẽ tự thay ảnh cũ.
+
+- Mở một vật tư đã lưu → **Sửa** → chạm vào khung ảnh để chụp bằng camera hoặc chọn từ thư viện.
+- Ảnh được **nén ngay trên máy** trước khi tải lên: thu nhỏ cạnh dài còn tối đa 640px, nén JPEG xuống khoảng 50–150KB. Mức này đủ để nhận diện vật tư, và giữ dung lượng kho GitHub ở mức rất nhỏ — 300 mã × 150KB chỉ khoảng 45MB, chưa tới 5% mức khuyến nghị 1GB của GitHub.
+- Ảnh hiện ở đầu trang chi tiết vật tư, và dạng thu nhỏ trong danh sách Vật tư cùng ô tìm kiếm khi xuất/nhập kho. Ảnh chỉ tải khi cuộn tới, không tải hết cả trăm ảnh cùng lúc.
+- Vật tư mới tạo cần lưu trước, sau đó mở lại để thêm ảnh (ảnh gắn theo mã định danh của vật tư, nên cần vật tư tồn tại trước).
+- Ảnh lưu tại `data/photos/<mã định danh>.jpg` trong kho GitHub, tách khỏi `items.json` — xóa hay thay ảnh không ảnh hưởng tới phần dữ liệu còn lại.
 
 ## Kết nối điện thoại và máy tính khác
 
@@ -67,21 +74,14 @@ Link chứa khóa truy cập. Chỉ gửi cho người trong nhóm.
 
 ## Phân quyền
 
-Chỉ có hai vai trò, quyền cố định, không cần bật tắt gì thêm.
-
 | Việc | Nhân viên | Quản trị viên |
 |---|---|---|
 | Xuất kho, nhập kho, quét QR, nhập Excel | Có | Có |
 | Tạo vật tư mới | Có | Có |
-| Sửa thông tin vật tư (mã, tên, nhóm, đơn vị, tồn tối thiểu, mô tả) | Có | Có |
-| Sửa số tồn theo từng kho | Có | Có |
-| Xóa vật tư | Không | Có |
+| Sửa thông tin vật tư | Nếu được bật trong Cài đặt | Có |
+| Sửa số tồn theo kho, xóa vật tư | Không | Có |
 | Sửa, xóa giao dịch trong Lịch sử | Không | Có |
 | Người dùng, kho, dây chuyền, cài đặt, sao lưu | Không | Có |
-
-Mỗi lần sửa số tồn được ghi thành giao dịch "Điều chỉnh tồn kho" trong Lịch sử kèm tên
-người sửa, nên vẫn biết ai chỉnh gì. Ai lỡ sửa sai thì quản trị viên xóa giao dịch điều
-chỉnh đó, hoặc mở lịch sử commit trên GitHub để quay lại.
 
 **Lưu ý thật lòng về bảo mật.** Đăng nhập bằng ID là để ghi nhận ai làm gì, giống bản cũ, không phải mật khẩu. Ai có khóa truy cập (tức là mọi thiết bị đã kết nối) về kỹ thuật đều có thể sửa dữ liệu trực tiếp qua GitHub. Bù lại, mọi thay đổi đều nằm trong lịch sử commit và khôi phục được. Khi có người nghỉ việc hoặc lỡ lộ link: vào GitHub xóa khóa cũ, tạo khóa mới, rồi gửi link kết nối mới cho các máy.
 
@@ -103,20 +103,10 @@ chỉnh đó, hoặc mở lịch sử commit trên GitHub để quay lại.
 
 ```
 data/meta.json          cài đặt, dây chuyền, kho, người dùng
-data/items.json         vật tư: mã, tên, nhóm, đơn vị, tồn tối thiểu
-data/stocks.json        số tồn theo từng kho, mỗi vật tư một dòng
-data/tx/_hot.json       giao dịch trong ngày hôm nay
-data/tx/2026-09.json    giao dịch các ngày trước của tháng 9/2026
+data/items.json         vật tư và tồn kho theo từng kho (kèm sha ảnh đại diện nếu có)
+data/tx/2026-09.json    giao dịch tháng 9/2026 (mỗi tháng một file)
+data/photos/<id>.jpg    ảnh đại diện từng vật tư, tải mới sẽ thay ảnh cũ
 ```
-
-Tồn kho tách khỏi `items.json` và giao dịch trong ngày tách khỏi file tháng là để mỗi
-lần nhập/xuất chỉ phải gửi lên GitHub hai file nhỏ. Với kho 2.000 mã, một lần xuất kho
-gửi khoảng 90 KB thay vì 1,2 MB như trước, nên quét tem bằng 4G ở xưởng không phải chờ.
-Mỗi ngày một lần, giao dịch của ngày đã qua được dồn vào file tháng.
-
-Kho dữ liệu tạo bằng bản cũ (tồn nằm trong `items.json`) vẫn mở được bình thường và tự
-chuyển sang cấu trúc này ngay ở thao tác lưu đầu tiên. **Sau khi cập nhật code, bảo mọi
-máy tải lại trang một lần** để không còn máy nào chạy bản cũ.
 
 Mã kho, mã vật tư, mã người dùng giữ nguyên như bản Firebase cũ, nên file Excel và tem QR đã in vẫn dùng được.
 
@@ -129,7 +119,9 @@ js/main.js          khởi động, điều hướng, vẽ lại khi dữ liệu
 js/store.js         đọc, đồng bộ và lưu an toàn (toàn bộ cơ chế chống mất dữ liệu)
 js/github.js        gọi GitHub API, commit nhiều file một lần
 js/model.js         cấu trúc dữ liệu, chốt chặn chống xóa hàng loạt
-js/migrate.js       chuyển dữ liệu từ Firebase cũ
+js/migrate.js       chuyển đổi file dữ liệu cũ (Firebase) sang định dạng mới
+js/photo.js         nén ảnh đại diện ngay trên máy trước khi tải lên
+js/avatar.js        hiển thị ảnh đại diện, chỉ tải khi cuộn tới
 js/components.js    dòng vật tư, xuất kho, sửa vật tư, tem QR, giao dịch
 js/excel.js         file mẫu, nhập và xuất Excel
 js/scanner.js       quét QR bằng camera

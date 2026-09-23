@@ -53,7 +53,7 @@ export async function downloadTemplate(v) {
 
   const ws = wb.addWorksheet('Nhap kho');
   ws.columns = [
-    { header: 'Mã spare part', key: 'code', width: 16 },
+    { header: 'Mã Q code', key: 'code', width: 16 },
     { header: 'Tên vật tư', key: 'name', width: 28 },
     { header: 'Nhóm', key: 'group', width: 14 },
     { header: 'Đơn vị', key: 'unit', width: 10 },
@@ -159,7 +159,7 @@ export function applyImport(d, rows, user) {
     if (!item) {
       item = {
         id: M.uid('it'), code: row.code, name: row.name, group: row.group || 'Khác', unit: row.unit || 'cái',
-        min: row.min !== '' ? Math.max(0, Math.round(Number(row.min))) : 0, detail: row.detail || '',
+        min: row.min !== '' ? Math.max(0, Math.round(Number(row.min))) : 0, detail: row.detail || '', stocks: {},
       };
       items.push(item);
       res.created++;
@@ -175,7 +175,7 @@ export function applyImport(d, rows, user) {
       const wh = meta.warehouses.find((w) => M.fold(w.name) === M.fold(row.wh));
       const qty = Math.round(Number(row.qty));
       const matched = row.user ? meta.users.find((u) => M.fold(u.name) === M.fold(row.user)) : null;
-      M.addStock(d, item.id, wh.id, qty);
+      M.addStock(item, wh.id, qty);
       M.pushTx(d, {
         id: M.uid('tx'), ts: now + i, type: 'nhap', itemId: item.id, qty, whId: wh.id, lineId: null,
         userId: matched ? matched.id : row.user ? null : user.id, rawUser: matched || !row.user ? null : row.user,

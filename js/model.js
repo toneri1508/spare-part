@@ -1,32 +1,20 @@
 /* Cấu trúc dữ liệu trong kho GitHub:
    data/meta.json        { settings, lines[], warehouses[], users[] }
-   data/items.json       [ { id, code, name, group, unit, min, detail } ]   ← thông tin ít khi đổi
-   data/stocks.json      { itemId: { whId: qty } }                          ← số tồn, đổi mỗi lần nhập/xuất
-   data/tx/_hot.json     giao dịch trong ngày hôm nay (file nhỏ)
-   data/tx/YYYY-MM.json  kho lưu giao dịch các ngày trước, mỗi tháng một file
-
-   Vì sao tách làm ba: mỗi lần nhập/xuất, app chỉ ghi lại những file thật sự đổi.
-   Trước đây một lần xuất kho phải gửi lại cả items.json (nửa MB) và cả file giao dịch
-   của tháng (gần 1 MB). Nay chỉ gửi stocks.json và _hot.json — nhẹ hơn khoảng 14 lần,
-   nên quét tem ở xưởng bằng 4G không phải chờ. Mỗi ngày một lần, giao dịch của ngày cũ
-   được dồn vào file tháng, nên số file trong kho vẫn ít, mở app vẫn nhanh. */
+   data/items.json       [ { id, code, name, group, unit, min, detail, stocks: { whId: qty } } ]
+   data/tx/YYYY-MM.json  [ { id, ts, type: 'nhap'|'xuat', itemId, qty, whId, lineId, userId, rawUser, note, source } ]
+   Mỗi tháng một file giao dịch để file luôn nhỏ, không giới hạn số giao dịch. */
 
 export const META = 'data/meta.json';
 export const ITEMS = 'data/items.json';
-export const STOCKS = 'data/stocks.json';
 export const TX_DIR = 'data/tx/';
-export const TX_HOT = `${TX_DIR}_hot.json`;
 
 export class UserError extends Error {}
 
 export const DEFAULT_SETTINGS = {
   title: 'Kho spare part',
   subtitle: 'Maint Line VD3',
+  staffCanEditItems: false,
 };
-
-/* Khóa cài đặt của bản cũ, nay quyền cố định theo vai trò nên không dùng nữa.
-   normalizeDraft() dọn đi để meta.json không còn dòng thừa gây hiểu nhầm. */
-const RETIRED_SETTINGS = ['staffCanEditItems'];
 
 export const STATUS_LABEL = { out: 'Hết hàng', low: 'Sắp hết', ok: 'Đủ hàng' };
 export const TYPE_LABEL = { nhap: 'Nhập', xuat: 'Xuất' };
@@ -40,14 +28,7 @@ export function monthKey(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function dayKey(ts) {
-  const d = new Date(Number.isFinite(ts) ? ts : 0);
-  return `${monthKey(ts)}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/* File lưu trữ lâu dài của một giao dịch (theo tháng). Giao dịch mới chưa vào đây
-   mà nằm ở TX_HOT cho tới khi sang ngày mới. */
-export const txArchivePath = (ts) => `${TX_DIR}${monthKey(ts)}.json`;
+export const txPath = (ts) => `${TX_DIR}${monthKey(ts)}.json`;
 
 export function defaultMeta(admin) {
   return {
@@ -84,14 +65,6 @@ export function fold(s) {
 
 export const totalQty = (item) => Object.values(item.stocks || {}).reduce((a, b) => a + num(b), 0);
 
-/* Tổng tồn của một vật tư đọc thẳng từ bộ file (dùng cho bản xem trước khi khôi phục,
-   nơi chưa có view). Đọc được cả bộ file kiểu cũ lẫn kiểu mới. */
-export function totalQtyIn(docs, item) {
-  const s = docs[STOCKS];
-  const byWh = (s && typeof s === 'object' && !Array.isArray(s) ? s[item.id] : null) || item.stocks || {};
-  return Object.values(byWh).reduce((a, b) => a + num(b), 0);
-}
-
 export function statusOf(item) {
   const t = totalQty(item);
   if (t <= 0) return 'out';
@@ -120,24 +93,16 @@ export function buildView(docs) {
     warehouses: Array.isArray(rawMeta.warehouses) ? rawMeta.warehouses : [],
     users: Array.isArray(rawMeta.users) ? rawMeta.users : [],
   };
-  /* Tồn kho nằm ở stocks.json. Dữ liệu cũ để tồn ngay trong từng vật tư,
-     nên vẫn đọc được cả hai kiểu — kiểu cũ tự chuyển sang kiểu mới ở lần lưu kế tiếp. */
-  const stockDoc = docs[STOCKS] && typeof docs[STOCKS] === 'object' && !Array.isArray(docs[STOCKS]) ? docs[STOCKS] : null;
-  const rawItems = Array.isArray(docs[ITEMS]) ? docs[ITEMS] : [];
-  const items = rawItems.map((it) => ({ ...it, stocks: (stockDoc && stockDoc[it.id]) || it.stocks || {} }));
-
+  const items = Array.isArray(docs[ITEMS]) ? docs[ITEMS] : [];
   const tx = [];
-  const monthSet = new Set();
+  const months = [];
   for (const [path, list] of Object.entries(docs)) {
     if (!path.startsWith(TX_DIR) || !Array.isArray(list)) continue;
-    for (const t of list) {
-      if (!t || t.hidden) continue;
-      tx.push(t);
-      monthSet.add(monthKey(t.ts));
-    }
+    months.push(path.slice(TX_DIR.length, -5));
+    for (const t of list) if (t && !t.hidden) tx.push(t);
   }
   tx.sort((a, b) => num(b.ts) - num(a.ts));
-  const months = [...monthSet].sort().reverse();
+  months.sort().reverse();
 
   const txByItem = new Map();
   for (const t of tx) {
@@ -188,95 +153,22 @@ export function draftItems(d) {
 export function requireItem(d, id) {
   const item = draftItems(d).find((i) => i.id === id);
   if (!item) throw new UserError('Vật tư này vừa bị xóa trên thiết bị khác.');
+  if (!item.stocks || typeof item.stocks !== 'object') item.stocks = {};
   return item;
 }
 
-/* ---------- tồn kho (stocks.json) ---------- */
-
-export function draftStocks(d) {
-  const s = d[STOCKS];
-  if (s && typeof s === 'object' && !Array.isArray(s)) return s;
-  if (s != null) throw new UserError('File data/stocks.json không đúng định dạng.');
-  d[STOCKS] = {};
-  return d[STOCKS];
+export function addStock(item, whId, delta) {
+  if (!item.stocks) item.stocks = {};
+  item.stocks[whId] = num(item.stocks[whId]) + delta;
 }
-
-export const stockOf = (d, itemId, whId) => num(draftStocks(d)[itemId]?.[whId]);
-
-/* Chỉ giữ kho còn số khác 0 → file nhỏ và diff trên GitHub dễ đọc. */
-export function setStock(d, itemId, whId, qty) {
-  const all = draftStocks(d);
-  const n = num(qty);
-  if (!n) {
-    if (all[itemId]) {
-      delete all[itemId][whId];
-      if (!Object.keys(all[itemId]).length) delete all[itemId];
-    }
-    return 0;
-  }
-  if (!all[itemId]) all[itemId] = {};
-  all[itemId][whId] = n;
-  return n;
-}
-
-export const addStock = (d, itemId, whId, delta) => setStock(d, itemId, whId, stockOf(d, itemId, whId) + delta);
 
 export const stockDelta = (tx) => (tx.type === 'xuat' ? -num(tx.qty) : num(tx.qty));
 
-/* ---------- giao dịch ---------- */
-
-/* Giao dịch mới luôn vào file nóng (nhỏ), không đụng vào file tháng. */
 export function pushTx(d, tx) {
-  if (!Array.isArray(d[TX_HOT])) d[TX_HOT] = [];
-  d[TX_HOT].unshift(tx);
+  const path = txPath(tx.ts);
+  if (!Array.isArray(d[path])) d[path] = [];
+  d[path].unshift(tx);
   return tx;
-}
-
-/* Dồn giao dịch của những ngày đã qua từ file nóng vào file tháng.
-   Chạy mỗi lần lưu nhưng chỉ thực sự ghi một lần mỗi ngày. */
-export function foldHotTx(d, now = Date.now()) {
-  const hot = d[TX_HOT];
-  if (!Array.isArray(hot) || !hot.length) return false;
-  const today = dayKey(now);
-  const stale = hot.filter((t) => dayKey(t?.ts) !== today);
-  if (!stale.length) return false;
-
-  for (const t of stale) {
-    const path = txArchivePath(t.ts);
-    if (!Array.isArray(d[path])) d[path] = [];
-    d[path].push(t);
-  }
-  for (const path of new Set(stale.map((t) => txArchivePath(t.ts)))) {
-    d[path].sort((a, b) => num(b.ts) - num(a.ts));
-  }
-  const keep = hot.filter((t) => dayKey(t?.ts) === today);
-  if (keep.length) d[TX_HOT] = keep;
-  else delete d[TX_HOT];
-  return true;
-}
-
-/* Dữ liệu bản cũ để tồn kho ngay trong từng vật tư. Chuyển sang stocks.json,
-   một lần duy nhất, ngay trong thao tác lưu kế tiếp. Không làm mất số nào. */
-export function normalizeDraft(d) {
-  const settings = d[META]?.settings;
-  if (settings) {
-    for (const k of RETIRED_SETTINGS) delete settings[k];
-  }
-  if (!Array.isArray(d[ITEMS])) return false;
-  let moved = false;
-  for (const it of d[ITEMS]) {
-    if (!it || !it.stocks || typeof it.stocks !== 'object') continue;
-    // stocks.json là bản chính; chỉ chuyển sang khi vật tư chưa có ở đó (giống buildView).
-    if (!draftStocks(d)[it.id]) {
-      for (const [whId, qty] of Object.entries(it.stocks)) {
-        if (num(qty)) setStock(d, it.id, whId, num(qty));
-      }
-    }
-    delete it.stocks;
-    moved = true;
-  }
-  if (moved && !d[STOCKS]) d[STOCKS] = {};
-  return moved;
 }
 
 export function locateTx(d, id) {
@@ -295,15 +187,10 @@ export function removeTxAt(d, loc) {
 
 /* ---------- ghi file ---------- */
 
-/* Mỗi vật tư / giao dịch / dòng tồn kho một dòng → xem thay đổi trên GitHub rất dễ đọc:
-   xuất 2 cái ở một kho chỉ hiện đúng một dòng đổi. */
-export function serialize(value, path) {
+/* Mỗi vật tư / giao dịch một dòng → xem thay đổi trên GitHub rất dễ đọc. */
+export function serialize(value) {
   if (Array.isArray(value)) {
     return value.length ? `[\n${value.map((v) => JSON.stringify(v)).join(',\n')}\n]\n` : '[]\n';
-  }
-  if (path === STOCKS && value && typeof value === 'object') {
-    const keys = Object.keys(value).sort();
-    return keys.length ? `{\n${keys.map((k) => `${JSON.stringify(k)}: ${JSON.stringify(value[k])}`).join(',\n')}\n}\n` : '{}\n';
   }
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -316,21 +203,10 @@ export function diffDocs(before, after) {
       changes.push({ path, delete: true });
       continue;
     }
-    const content = serialize(after[path], path);
-    if (!(path in before) || serialize(before[path], path) !== content) changes.push({ path, content });
+    const content = serialize(after[path]);
+    if (!(path in before) || serialize(before[path]) !== content) changes.push({ path, content });
   }
   return changes;
-}
-
-/* Số vật tư đang có tồn ở ít nhất một kho — dùng cho chốt chặn bên dưới.
-   Đọc được cả kiểu cũ (tồn nằm trong từng vật tư) lẫn kiểu mới (stocks.json). */
-export function countStocked(docs) {
-  const s = docs[STOCKS];
-  if (s && typeof s === 'object' && !Array.isArray(s)) {
-    return Object.values(s).filter((byWh) => byWh && Object.values(byWh).some((q) => num(q) !== 0)).length;
-  }
-  const items = Array.isArray(docs[ITEMS]) ? docs[ITEMS] : [];
-  return items.filter((i) => i && i.stocks && Object.values(i.stocks).some((q) => num(q) !== 0)).length;
 }
 
 export function countDocs(docs) {
@@ -362,14 +238,5 @@ export function guardAgainstLoss(before, after, opts = {}) {
     if (b[key] - a[key] > (allow[key] || 0)) {
       throw new UserError(`Đã chặn lưu để bảo vệ dữ liệu: số ${COUNT_LABEL[key]} sẽ giảm từ ${b[key]} xuống ${a[key]}.`);
     }
-  }
-
-  /* Tồn kho không đếm cứng được: xuất hết một mã thì mã đó rời khỏi stocks.json,
-     đó là chuyện bình thường. Chỉ chặn khi cả file tồn kho gần như bay sạch trong
-     một thao tác — dấu hiệu của ghi đè hỏng chứ không phải nghiệp vụ thật. */
-  const bs = countStocked(before);
-  const as = countStocked(after);
-  if (bs >= 10 && bs - as >= 10 && as < bs / 2) {
-    throw new UserError(`Đã chặn lưu để bảo vệ dữ liệu: số vật tư còn tồn sẽ giảm từ ${bs} xuống ${as}.`);
   }
 }
